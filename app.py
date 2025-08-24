@@ -55,7 +55,6 @@ def add_user(username, mobile):
 
 def add_work(user_id, date, hours, cost_per_hour):
     df = load_data()
-    # Get username and mobile for this user_id (take first match)
     user_rows = df[df["user_id"] == user_id]
     if user_rows.empty:
         return
@@ -68,19 +67,20 @@ def add_work(user_id, date, hours, cost_per_hour):
     save_data(df)
 
 def delete_entry_by_index(df_index):
-    """
-    Delete a row by pandas DataFrame index (the index from load_data()).
-    This is robust when 'id' column is None for some placeholder rows.
-    """
     df = load_data()
     if df_index in df.index:
         df = df.drop(df_index)
-        # reset index to keep consistent ordering
         df = df.reset_index(drop=True)
         save_data(df)
 
+def delete_user(user_id):
+    """Delete all records for a particular user_id"""
+    df = load_data()
+    df = df[df["user_id"] != user_id]
+    df = df.reset_index(drop=True)
+    save_data(df)
+
 # ---------------- AUTO REFRESH ----------------
-# Refresh every 5 seconds so that after deploy, all details auto-update
 st_autorefresh(interval=5000, limit=None, key="refresh")
 
 # ---------------- Streamlit UI ----------------
@@ -96,16 +96,13 @@ with tab1:
     df = load_data()
 
     if not df.empty:
-        # Ensure DataFrame index is stable for keys
-        df = df.reset_index(drop=False)  # keep the old index in 'index' column temporarily
-        # Use usernames present (dropna)
+        df = df.reset_index(drop=False)
         users = df["username"].dropna().unique()
 
         for i, user in enumerate(users):
             user_df = df[df["username"] == user]
-
-            # show mobile in header if exists
             mobile_display = user_df["mobile"].dropna().iloc[0] if not user_df["mobile"].dropna().empty else ""
+
             with st.expander(f"👤 {user} ({mobile_display})"):
                 col1, col2 = st.columns(2)
 
@@ -113,23 +110,19 @@ with tab1:
                     st.subheader("Details")
 
                     if not user_df.empty:
-                        # iterate over DataFrame rows and use the pandas index for unique keys
                         for _, row in user_df.iterrows():
-                            # row['index'] holds the original index before reset; use that as unique identifier
                             df_index = int(row["index"])
                             if pd.isna(row["date"]):
                                 continue
                             st.write(
                                 f"📅 {row['date']} | ⏱ {row['hours_worked']} hrs | 💰 ₹{row['total_cost']} (₹{row['cost_per_hour']}/hr)"
                             )
-                            # Use the dataframe index to form unique key
                             btn_key = f"del_{df_index}"
                             if st.button("❌ Delete", key=btn_key):
                                 delete_entry_by_index(df_index)
                                 st.success("Entry deleted successfully!")
                                 st.rerun()
 
-                    # ✅ Send Bill Button
                     send_key = f"send_{i}"
                     if st.button("📤 Send Bill", key=send_key):
                         total_cost = user_df["total_cost"].dropna().sum()
@@ -139,6 +132,14 @@ with tab1:
                         whatsapp_url = f"https://wa.me/{mobile}?text={encoded_message}"
                         st.markdown(f"[Click here to send via WhatsApp]({whatsapp_url})", unsafe_allow_html=True)
 
+                    # ✅ Delete User button
+                    del_user_key = f"delete_user_{i}"
+                    if st.button(f"🗑️ Delete User {user}", key=del_user_key):
+                        user_id = int(user_df["user_id"].iloc[0])
+                        delete_user(user_id)
+                        st.success(f"User '{user}' and all their records deleted!")
+                        st.rerun()
+
                 with col2:
                     st.subheader("Add Work Entry")
                     hours = st.number_input(f"Hours worked for {user}", min_value=1, step=1, key=f"hours_{i}")
@@ -146,7 +147,6 @@ with tab1:
                     date = st.date_input(f"Date for {user}", datetime.today(), key=f"date_{i}")
                     add_key = f"add_{i}"
                     if st.button(f"Add Entry for {user}", key=add_key):
-                        # use the first user_id for that username
                         user_id = int(user_df["user_id"].iloc[0])
                         add_work(user_id, str(date), hours, cost_per_hour)
                         st.success(f"Added {hours} hours for {user} on {date} at ₹{cost_per_hour}/hr")
@@ -185,7 +185,6 @@ with tab2:
             if not user_entries_sorted.empty:
                 st.subheader(f"📈 Work Analysis for {selected_user}")
 
-                # Hours worked over time
                 fig, ax = plt.subplots()
                 ax.plot(user_entries_sorted["date"], user_entries_sorted["hours_worked"], marker="o")
                 ax.set_xlabel("Date")
@@ -193,7 +192,6 @@ with tab2:
                 ax.set_title(f"Hours Worked Over Time - {selected_user}")
                 st.pyplot(fig)
 
-                # Total cost analysis
                 total_cost = user_entries_sorted["total_cost"].sum()
                 st.metric("💰 Total Billing", f"₹{total_cost}")
             else:
